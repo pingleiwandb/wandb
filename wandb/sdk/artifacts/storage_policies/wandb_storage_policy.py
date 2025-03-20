@@ -32,6 +32,7 @@ from wandb.sdk.artifacts.storage_handlers.wb_local_artifact_handler import (
 from wandb.sdk.artifacts.storage_layout import StorageLayout
 from wandb.sdk.artifacts.storage_policies.register import WANDB_STORAGE_POLICY
 from wandb.sdk.artifacts.storage_policy import StoragePolicy
+from wandb.sdk.artifacts.storage_policies.multi_downloader import MultiDownloader
 from wandb.sdk.internal.internal_api import Api as InternalApi
 from wandb.sdk.internal.thread_local_settings import _thread_local_api_settings
 from wandb.sdk.lib.hashutil import B64MD5, b64_to_hex_id, hex_to_b64_id
@@ -110,6 +111,7 @@ class WandbStoragePolicy(StoragePolicy):
             ],
             default_handler=TrackingHandler(),
         )
+        self._multi_downloader = MultiDownloader()
 
     def config(self) -> dict:
         return self._config
@@ -129,6 +131,19 @@ class WandbStoragePolicy(StoragePolicy):
         )
         if hit:
             return path
+        
+        # TODO(pinglei): this is a hack to make the download faster
+        if manifest_entry.size > 100 * 1024**2:
+            print(f"path: {path}")
+            print(f"Downloading large file {manifest_entry.path} with size {manifest_entry.size} to {dest_path}")
+            self._multi_downloader.download_file(
+                manifest_entry._download_url,
+                manifest_entry.size,
+                dest_path,
+            )
+            return path
+        else:
+            print("Not downloading large file")
 
         if manifest_entry._download_url is not None:
             response = self._session.get(manifest_entry._download_url, stream=True)

@@ -15,6 +15,12 @@ if TYPE_CHECKING:
 
 
 class StoragePolicy:
+    """Base class for W&B artifact storage policies.
+
+    This class defines the interface for storage policies used by artifacts.
+    For the default W&B implementation, see :class:`wandb.sdk.artifacts.storage_policies.WandbStoragePolicy`.
+    """
+       
     @classmethod
     def lookup_by_name(cls, name: str) -> type[StoragePolicy]:
         import wandb.sdk.artifacts.storage_policies  # noqa: F401

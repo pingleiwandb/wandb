@@ -3187,6 +3187,8 @@ class Run:
         Returns:
             An `Artifact` object.
         """
+        print("pinglei: log artifact print statement")
+        # breakpoint()
         return self._log_artifact(
             artifact_or_path,
             name=name,
