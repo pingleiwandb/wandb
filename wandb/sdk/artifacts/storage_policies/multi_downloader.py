@@ -59,6 +59,15 @@ class MultiDownloader:
             file_path: Local path to save the file to
             callback: Optional callback function that takes bytes transferred as argument
         """
+        num_chunks = int(math.ceil(size / float(self._chunk_size)))
+        # Print configuration in human readable format
+        print("\nStarting parallel download with configuration:")
+        print(f"  - Max concurrent downloads: {self._max_concurrency}")
+        print(f"  - Chunk size: {self._chunk_size / (1024*1024):.1f} MB")
+        print(f"  - Number of chunks: {num_chunks}")
+        print(f"  - IO queue size: {self._max_io_queue}")
+        print(f"  - Number of retries: {self._num_retries}")
+        print(f"  - Total file size: {size / (1024*1024):.1f} MB\n")
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as controller:
             # 1 thread for managing the parallel downloads

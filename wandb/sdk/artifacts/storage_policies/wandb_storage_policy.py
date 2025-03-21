@@ -111,7 +111,11 @@ class WandbStoragePolicy(StoragePolicy):
             ],
             default_handler=TrackingHandler(),
         )
-        self._multi_downloader = MultiDownloader()
+        self._multi_downloader = MultiDownloader(
+            max_concurrency=int(os.environ.get('PM_MAX_CONCURRENCY', '8')),
+            chunk_size=int(os.environ.get('PM_CHUNK_SIZE', str(1024*1024*128))),
+            num_retries=int(os.environ.get('PM_NUM_RETRIES', '3')),
+        )
 
     def config(self) -> dict:
         return self._config
@@ -133,7 +137,8 @@ class WandbStoragePolicy(StoragePolicy):
             return path
         
         # TODO(pinglei): this is a hack to make the download faster
-        if manifest_entry.size > 100 * 1024**2:
+        print(f"PM_ON={os.environ.get('PM_ON', 'false')}")
+        if manifest_entry.size > 100 * 1024**2 and os.environ.get("PM_ON", "false") == "true":
             print(f"path: {path}")
             print(f"Downloading large file {manifest_entry.path} with size {manifest_entry.size} to {dest_path}")
             self._multi_downloader.download_file(
