@@ -32,7 +32,11 @@ from wandb.sdk.artifacts.storage_handlers.wb_local_artifact_handler import (
 from wandb.sdk.artifacts.storage_layout import StorageLayout
 from wandb.sdk.artifacts.storage_policies.register import WANDB_STORAGE_POLICY
 from wandb.sdk.artifacts.storage_policy import StoragePolicy
-from wandb.sdk.artifacts.storage_policies.multi_downloader import MultiDownloader
+from wandb.sdk.artifacts.storage_policies.multi_downloader import (
+    HttpxAsyncDownloader,
+    HttpxSyncDownloader,
+    RequestsDownloader,
+)
 from wandb.sdk.internal.internal_api import Api as InternalApi
 from wandb.sdk.internal.thread_local_settings import _thread_local_api_settings
 from wandb.sdk.lib.hashutil import B64MD5, b64_to_hex_id, hex_to_b64_id
@@ -111,7 +115,28 @@ class WandbStoragePolicy(StoragePolicy):
             ],
             default_handler=TrackingHandler(),
         )
-        self._multi_downloader = MultiDownloader(
+        # Select downloader implementation based on environment variables
+        downloader_type = "requests"  # default
+        if os.environ.get('PM_HTTPX_SYNC1'):
+            downloader_type = "httpx_sync1"
+        elif os.environ.get('PM_HTTPX_SYNC2'):
+            downloader_type = "httpx_sync2"
+        elif os.environ.get('PM_HTTPX_ASYNC'):
+            downloader_type = "httpx_async"
+            # Check if HTTP/1 is explicitly requested for async
+            use_http2 = not os.environ.get('PM_HTTPX_ASYNC_HTTP1', False)
+        elif os.environ.get('PM_REQUESTS'):
+            downloader_type = "requests"
+        print(f"downloader_type: {downloader_type}")
+
+        downloader_class = {
+            "requests": RequestsDownloader,
+            "httpx_sync1": lambda **kwargs: HttpxSyncDownloader(http2=False, **kwargs),
+            "httpx_sync2": lambda **kwargs: HttpxSyncDownloader(http2=True, **kwargs),
+            "httpx_async": lambda **kwargs: HttpxAsyncDownloader(http2=use_http2, **kwargs) if downloader_type == "httpx_async" else HttpxAsyncDownloader(**kwargs),
+        }[downloader_type]
+
+        self._multi_downloader = downloader_class(
             max_concurrency=int(os.environ.get('PM_MAX_CONCURRENCY', '8')),
             chunk_size=int(os.environ.get('PM_CHUNK_SIZE', str(1024*1024*128))),
             num_retries=int(os.environ.get('PM_NUM_RETRIES', '3')),
