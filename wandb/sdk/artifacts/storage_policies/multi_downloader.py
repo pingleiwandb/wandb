@@ -41,13 +41,14 @@ class ShutdownQueue(queue.Queue):
 class BaseDownloader(abc.ABC):
     """Base class for all downloader implementations."""
     def __init__(self, max_concurrency: int = 10, max_io_queue: int = 100,
+                 iter_content_chunk_size: int = 16 * 1024,
                  chunk_size: int = 8 * 1024 * 1024, num_retries: int = 5):
         self._max_concurrency = max_concurrency
         self._max_io_queue = max_io_queue
         self._chunk_size = chunk_size
         self._num_retries = num_retries
         self._ioqueue = ShutdownQueue(self._max_io_queue)
-
+        self._iter_content_chunk_size = iter_content_chunk_size
     def download_file(self, url: str, size: int, file_path: str,
                      callback: Optional[Callable[[int], None]] = None) -> None:
         """
@@ -66,6 +67,7 @@ class BaseDownloader(abc.ABC):
         print(f"  - Chunk size: {self._chunk_size / (1024*1024):.1f} MB")
         print(f"  - Number of chunks: {num_chunks}")
         print(f"  - IO queue size: {self._max_io_queue}")
+        print(f"  - Iter content chunk size: {self._iter_content_chunk_size}")
         print(f"  - Number of retries: {self._num_retries}")
         print(f"  - Total file size: {size / (1024*1024):.1f} MB\n")
         
@@ -178,7 +180,7 @@ class RequestsDownloader(BaseDownloader):
                     response.raise_for_status()
                     
                     current_index = self._chunk_size * part_index
-                    for chunk in response.iter_content(chunk_size=16 * 1024):
+                    for chunk in response.iter_content(chunk_size=self._iter_content_chunk_size):
                         if chunk:
                             self._ioqueue.put((current_index, chunk))
                             current_index += len(chunk)
@@ -239,7 +241,7 @@ class HttpxDownloaderBase(BaseDownloader):
                     with self._client.stream('GET', url, headers=headers) as response:
                         response.raise_for_status()
                         current_index = self._chunk_size * part_index
-                        for chunk in response.iter_bytes(chunk_size=16 * 1024):
+                        for chunk in response.iter_bytes(chunk_size=self._iter_content_chunk_size):
                             if chunk:
                                 self._ioqueue.put((current_index, chunk))
                                 current_index += len(chunk)
@@ -350,7 +352,7 @@ class HttpxAsyncDownloader(BaseDownloader):
                         async with self._client.stream('GET', url, headers=headers) as response:
                             response.raise_for_status()
                             current_index = self._chunk_size * part_index
-                            async for chunk in response.aiter_bytes(chunk_size=16 * 1024):
+                            async for chunk in response.aiter_bytes(chunk_size=self._iter_content_chunk_size):
                                 if chunk:
                                     await self._ioqueue.put((current_index, chunk))
                                     current_index += len(chunk)
@@ -397,6 +399,3 @@ class HttpxAsyncDownloader(BaseDownloader):
                         )
                         self._ioqueue.trigger_shutdown()
                         raise
-
-# For backward compatibility
-MultiDownloader = RequestsDownloader

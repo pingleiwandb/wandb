@@ -140,6 +140,8 @@ class WandbStoragePolicy(StoragePolicy):
             max_concurrency=int(os.environ.get('PM_MAX_CONCURRENCY', '8')),
             chunk_size=int(os.environ.get('PM_CHUNK_SIZE', str(1024*1024*128))),
             num_retries=int(os.environ.get('PM_NUM_RETRIES', '3')),
+            max_io_queue=int(os.environ.get('PM_MAX_IO_QUEUE', '100')),
+            iter_content_chunk_size=int(os.environ.get('PM_ITER_CONTENT_CHUNK_SIZE', str(16 * 1024))),
         )
 
     def config(self) -> dict:
