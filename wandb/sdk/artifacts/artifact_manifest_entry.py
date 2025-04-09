@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import concurrent.futures
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -129,7 +130,10 @@ class ArtifactManifestEntry:
         return self._parent_artifact
 
     def download(
-        self, root: str | None = None, skip_cache: bool | None = None
+        self,
+        root: str | None = None,
+        skip_cache: bool | None = None,
+        executor: concurrent.futures.ThreadPoolExecutor | None = None,
     ) -> FilePathStr:
         """Download this artifact entry to the specified root path.
 
@@ -169,7 +173,10 @@ class ArtifactManifestEntry:
             )
         else:
             cache_path = self._parent_artifact.manifest.storage_policy.load_file(
-                self._parent_artifact, self, dest_path=override_cache_path
+                self._parent_artifact,
+                self,
+                dest_path=override_cache_path,
+                executor=executor,
             )
 
         if skip_cache:

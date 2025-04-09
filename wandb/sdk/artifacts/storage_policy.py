@@ -8,6 +8,8 @@ from wandb.sdk.internal.internal_api import Api as InternalApi
 from wandb.sdk.lib.paths import FilePathStr, URIStr
 
 if TYPE_CHECKING:
+    from concurrent.futures import ThreadPoolExecutor
+
     from wandb.filesync.step_prepare import StepPrepare
     from wandb.sdk.artifacts.artifact import Artifact
     from wandb.sdk.artifacts.artifact_manifest_entry import ArtifactManifestEntry
@@ -15,6 +17,8 @@ if TYPE_CHECKING:
 
 
 class StoragePolicy:
+    """Implemented by WandbStoragePolicy."""
+
     @classmethod
     def lookup_by_name(cls, name: str) -> type[StoragePolicy]:
         import wandb.sdk.artifacts.storage_policies  # noqa: F401
@@ -40,6 +44,7 @@ class StoragePolicy:
         artifact: Artifact,
         manifest_entry: ArtifactManifestEntry,
         dest_path: str | None = None,
+        executor: ThreadPoolExecutor | None = None,
     ) -> FilePathStr:
         raise NotImplementedError
 

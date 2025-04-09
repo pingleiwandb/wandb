@@ -1877,6 +1877,7 @@ class Artifact:
 
         def _download_entry(
             entry: ArtifactManifestEntry,
+            executor: concurrent.futures.ThreadPoolExecutor,
             api_key: str | None,
             cookies: dict | None,
             headers: dict | None,
@@ -1886,7 +1887,7 @@ class Artifact:
             _thread_local_api_settings.headers = headers
 
             try:
-                entry.download(root, skip_cache=skip_cache)
+                entry.download(root, skip_cache=skip_cache, executor=executor)
             except FileNotFoundError as e:
                 if allow_missing_references:
                     wandb.termwarn(str(e))
@@ -1897,14 +1898,14 @@ class Artifact:
                 return
             download_logger.notify_downloaded()
 
-        download_entry = partial(
-            _download_entry,
-            api_key=_thread_local_api_settings.api_key,
-            cookies=_thread_local_api_settings.cookies,
-            headers=_thread_local_api_settings.headers,
-        )
-
         with concurrent.futures.ThreadPoolExecutor(64) as executor:
+            download_entry = partial(
+                _download_entry,
+                executor=executor,
+                api_key=_thread_local_api_settings.api_key,
+                cookies=_thread_local_api_settings.cookies,
+                headers=_thread_local_api_settings.headers,
+            )
             active_futures = set()
             has_next_page = True
             cursor = None

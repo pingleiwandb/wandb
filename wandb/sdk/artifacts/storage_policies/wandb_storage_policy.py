@@ -6,6 +6,7 @@ import hashlib
 import math
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Sequence
 from urllib.parse import quote
 
@@ -31,6 +32,10 @@ from wandb.sdk.artifacts.storage_handlers.wb_local_artifact_handler import (
     WBLocalArtifactHandler,
 )
 from wandb.sdk.artifacts.storage_layout import StorageLayout
+from wandb.sdk.artifacts.storage_policies.parallel_downloader import (
+    PRAALLEL_DOWNLOAD_SIZE,
+    ParallelDownloader,
+)
 from wandb.sdk.artifacts.storage_policies.register import WANDB_STORAGE_POLICY
 from wandb.sdk.artifacts.storage_policy import StoragePolicy
 from wandb.sdk.internal.internal_api import Api as InternalApi
@@ -87,6 +92,7 @@ class WandbStoragePolicy(StoragePolicy):
         )
         self._session.mount("http://", adapter)
         self._session.mount("https://", adapter)
+        self._parallel_downloader = ParallelDownloader()
 
         s3 = S3Handler()
         gcs = GCSHandler()
@@ -120,6 +126,7 @@ class WandbStoragePolicy(StoragePolicy):
         artifact: Artifact,
         manifest_entry: ArtifactManifestEntry,
         dest_path: str | None = None,
+        executor: ThreadPoolExecutor | None = None,
     ) -> FilePathStr:
         if dest_path is not None:
             self._cache._override_cache_path = dest_path
@@ -132,6 +139,20 @@ class WandbStoragePolicy(StoragePolicy):
             return path
 
         if manifest_entry._download_url is not None:
+            # Paralell download
+            # NOTE: unit of size is byte
+            print(f"pinglei: Downloading file of size {manifest_entry.size}")
+            if manifest_entry.size >= PRAALLEL_DOWNLOAD_SIZE and executor is not None:
+                print(f"pinglei: Downloading file of size {manifest_entry.size} in parallel")
+                self._parallel_downloader.download_file(
+                    executor,
+                    self._session,
+                    manifest_entry._download_url,
+                    manifest_entry.size,
+                    cache_open,
+                )
+                return path
+            # Serial download
             response = self._session.get(manifest_entry._download_url, stream=True)
             try:
                 response.raise_for_status()
