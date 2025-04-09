@@ -9,14 +9,13 @@ from typing import NamedTuple, Union
 import requests
 
 from wandb.sdk.artifacts.artifact_file_cache import Opener
-
-PRAALLEL_DOWNLOAD_SIZE = 1 * 1024 * 1024 * 1024  # 1GB
+from wandb.sdk.artifacts.storage_policy import ArtifactDownloadConfig
 
 # TODO: Rename to sentienl? We can also shutdown
 _ALL_CHUNK_DOWNLOADED = object()
 
 
-# TODO: NamedTuple vs TypedDict
+# NOTE: NamedTuple vs TypedDict, NamedTuple is immutable
 class _ChunkContent(NamedTuple):
     offset: int
     data: bytes
@@ -100,6 +99,13 @@ class ParallelDownloader:
     def __init__(self):
         pass
 
+    def need_parallel(
+        self, file_size_bytes: int, download_config: ArtifactDownloadConfig
+    ) -> bool:
+        if download_config.parallel is not None:
+            return download_config.parallel
+        return file_size_bytes >= download_config.file_size_threshold_bytes
+
     def download_file(
         self,
         executor: concurrent.futures.ThreadPoolExecutor,
@@ -107,24 +113,25 @@ class ParallelDownloader:
         signed_url: str,
         file_size_bytes: int,
         file_opener: Opener,
-        chunk_size_bytes: int = 64 * 1024 * 1024,
-        response_content_iter_size_bytes: int = 1024 * 1024,
+        download_config: ArtifactDownloadConfig,
     ) -> None:
         q = _ChunkQueue(maxsize=100)
 
         # Start downloadign chunks
-        num_chunks = int(math.ceil(file_size_bytes / float(chunk_size_bytes)))
+        num_chunks = int(
+            math.ceil(file_size_bytes / float(download_config.chunk_size_bytes))
+        )
         download_futures = []
         for i in range(num_chunks):
-            start = i * chunk_size_bytes
-            end = min(start + chunk_size_bytes, file_size_bytes)
+            start = i * download_config.chunk_size_bytes
+            end = min(start + download_config.chunk_size_bytes, file_size_bytes)
             download_handler = functools.partial(
                 _download_chunk,
                 q,
                 session,
                 signed_url,
                 _ChunkRange(start, end),
-                response_content_iter_size_bytes,
+                download_config.http_response_content_iter_size_bytes,
             )
             download_futures.append(executor.submit(download_handler))
 

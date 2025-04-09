@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import os
-import concurrent.futures
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+from wandb.sdk.artifacts.storage_policy import (
+    DEFAULT_DOWNLOAD_CONFIG,
+    ArtifactDownloadConfig,
+)
 from wandb.sdk.lib import filesystem
 from wandb.sdk.lib.deprecate import Deprecated, deprecate
 from wandb.sdk.lib.hashutil import (
@@ -134,6 +138,7 @@ class ArtifactManifestEntry:
         root: str | None = None,
         skip_cache: bool | None = None,
         executor: concurrent.futures.ThreadPoolExecutor | None = None,
+        download_config: ArtifactDownloadConfig = DEFAULT_DOWNLOAD_CONFIG,
     ) -> FilePathStr:
         """Download this artifact entry to the specified root path.
 
@@ -177,6 +182,7 @@ class ArtifactManifestEntry:
                 self,
                 dest_path=override_cache_path,
                 executor=executor,
+                download_config=download_config,
             )
 
         if skip_cache:
