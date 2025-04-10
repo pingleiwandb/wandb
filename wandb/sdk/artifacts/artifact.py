@@ -53,7 +53,11 @@ from wandb.sdk.artifacts.staging import get_staging_dir
 from wandb.sdk.artifacts.storage_handlers.gcs_handler import _GCSIsADirectoryError
 from wandb.sdk.artifacts.storage_layout import StorageLayout
 from wandb.sdk.artifacts.storage_policies import WANDB_STORAGE_POLICY
-from wandb.sdk.artifacts.storage_policy import StoragePolicy
+from wandb.sdk.artifacts.storage_policy import (
+    DEFAULT_DOWNLOAD_CONFIG,
+    ArtifactDownloadConfig,
+    StoragePolicy,
+)
 from wandb.sdk.data_types._dtypes import Type as WBType
 from wandb.sdk.data_types._dtypes import TypeRegistry
 from wandb.sdk.internal.internal_api import Api as InternalApi
@@ -1749,6 +1753,7 @@ class Artifact:
         allow_missing_references: bool = False,
         skip_cache: bool | None = None,
         path_prefix: StrPath | None = None,
+        download_config: ArtifactDownloadConfig = DEFAULT_DOWNLOAD_CONFIG,
     ) -> FilePathStr:
         """Download the contents of the artifact to the specified root directory.
 
@@ -1793,6 +1798,7 @@ class Artifact:
             allow_missing_references=allow_missing_references,
             skip_cache=skip_cache,
             path_prefix=path_prefix,
+            download_config=download_config,
         )
 
     def _download_using_core(
@@ -1861,6 +1867,7 @@ class Artifact:
         allow_missing_references: bool = False,
         skip_cache: bool | None = None,
         path_prefix: StrPath | None = None,
+        download_config: ArtifactDownloadConfig = DEFAULT_DOWNLOAD_CONFIG,
     ) -> FilePathStr:
         nfiles = len(self.manifest.entries)
         size = sum(e.size or 0 for e in self.manifest.entries.values())
@@ -1877,6 +1884,7 @@ class Artifact:
 
         def _download_entry(
             entry: ArtifactManifestEntry,
+            executor: concurrent.futures.ThreadPoolExecutor,
             api_key: str | None,
             cookies: dict | None,
             headers: dict | None,
@@ -1886,7 +1894,12 @@ class Artifact:
             _thread_local_api_settings.headers = headers
 
             try:
-                entry.download(root, skip_cache=skip_cache)
+                entry.download(
+                    root,
+                    skip_cache=skip_cache,
+                    executor=executor,
+                    download_config=download_config,
+                )
             except FileNotFoundError as e:
                 if allow_missing_references:
                     wandb.termwarn(str(e))
@@ -1897,14 +1910,17 @@ class Artifact:
                 return
             download_logger.notify_downloaded()
 
-        download_entry = partial(
-            _download_entry,
-            api_key=_thread_local_api_settings.api_key,
-            cookies=_thread_local_api_settings.cookies,
-            headers=_thread_local_api_settings.headers,
-        )
-
-        with concurrent.futures.ThreadPoolExecutor(64) as executor:
+        # https://github.com/wandb/wandb/issues/6579
+        with concurrent.futures.ThreadPoolExecutor(
+            download_config.thread_pool_size
+        ) as executor:
+            download_entry = partial(
+                _download_entry,
+                executor=executor,
+                api_key=_thread_local_api_settings.api_key,
+                cookies=_thread_local_api_settings.cookies,
+                headers=_thread_local_api_settings.headers,
+            )
             active_futures = set()
             has_next_page = True
             cursor = None

@@ -85,6 +85,7 @@ from wandb.sdk.internal import profiler
 
 # Artifact import types
 from wandb.sdk.artifacts.artifact_ttl import ArtifactTTL
+from wandb.sdk import ArtifactDownloadConfig
 
 # Used to make sure we don't use some code in the incorrect process context
 _IS_INTERNAL_PROCESS = False
@@ -238,6 +239,7 @@ __all__ = (
     "Molecule",
     "Histogram",
     "ArtifactTTL",
+    "ArtifactDownloadConfig",
     "log_artifact",
     "use_artifact",
     "log_model",

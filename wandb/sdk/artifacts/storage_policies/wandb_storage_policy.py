@@ -6,11 +6,13 @@ import hashlib
 import math
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Sequence
 from urllib.parse import quote
 
 import requests
 import urllib3
+from typing_extensions import override
 
 from wandb.errors.term import termwarn
 from wandb.proto.wandb_internal_pb2 import ServerFeature
@@ -31,8 +33,13 @@ from wandb.sdk.artifacts.storage_handlers.wb_local_artifact_handler import (
     WBLocalArtifactHandler,
 )
 from wandb.sdk.artifacts.storage_layout import StorageLayout
+from wandb.sdk.artifacts.storage_policies.parallel_downloader import ParallelDownloader
 from wandb.sdk.artifacts.storage_policies.register import WANDB_STORAGE_POLICY
-from wandb.sdk.artifacts.storage_policy import StoragePolicy
+from wandb.sdk.artifacts.storage_policy import (
+    DEFAULT_DOWNLOAD_CONFIG,
+    ArtifactDownloadConfig,
+    StoragePolicy,
+)
 from wandb.sdk.internal.internal_api import Api as InternalApi
 from wandb.sdk.internal.thread_local_settings import _thread_local_api_settings
 from wandb.sdk.lib.hashutil import B64MD5, b64_to_hex_id, hex_to_b64_id
@@ -87,6 +94,7 @@ class WandbStoragePolicy(StoragePolicy):
         )
         self._session.mount("http://", adapter)
         self._session.mount("https://", adapter)
+        self._parallel_downloader = ParallelDownloader()
 
         s3 = S3Handler()
         gcs = GCSHandler()
@@ -115,11 +123,14 @@ class WandbStoragePolicy(StoragePolicy):
     def config(self) -> dict:
         return self._config
 
+    @override
     def load_file(
         self,
         artifact: Artifact,
         manifest_entry: ArtifactManifestEntry,
         dest_path: str | None = None,
+        executor: ThreadPoolExecutor | None = None,
+        download_config: ArtifactDownloadConfig = DEFAULT_DOWNLOAD_CONFIG,
     ) -> FilePathStr:
         if dest_path is not None:
             self._cache._override_cache_path = dest_path
@@ -132,6 +143,30 @@ class WandbStoragePolicy(StoragePolicy):
             return path
 
         if manifest_entry._download_url is not None:
+            # Paralell download
+            # NOTE: unit of size is byte
+            print(
+                f"pinglei: Downloading file of size {manifest_entry.size} config: {download_config}"
+            )
+            if (
+                self._parallel_downloader.need_parallel(
+                    manifest_entry.size, download_config
+                )
+                and executor is not None
+            ):
+                print(
+                    f"pinglei: Downloading file of size {manifest_entry.size} in parallel"
+                )
+                self._parallel_downloader.download_file(
+                    executor,
+                    self._session,
+                    manifest_entry._download_url,
+                    manifest_entry.size,
+                    cache_open,
+                    download_config,
+                )
+                return path
+            # Serial download
             response = self._session.get(manifest_entry._download_url, stream=True)
             try:
                 response.raise_for_status()
