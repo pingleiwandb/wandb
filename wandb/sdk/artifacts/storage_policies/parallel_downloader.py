@@ -4,6 +4,7 @@ import concurrent.futures
 import functools
 import math
 import queue
+import time
 from typing import NamedTuple, Union
 
 import requests
@@ -77,8 +78,17 @@ def _download_chunk(
         file_offset += len(content)
 
 
-def _write_chunks_to_file(q: _ChunkQueue, file_opener: Opener) -> None:
+def _write_chunks_to_file(
+    q: _ChunkQueue,
+    file_opener: Opener,
+    file_size_bytes: int,
+) -> None:
     """Write all chunks to disk."""
+    start_time = time.time()
+    bytes_written = 0
+    chunks_written = 0
+
+    print(f"Writing {file_size_bytes / 1024 / 1024 / 1024} GB file")
     with file_opener("wb") as f:
         while True:
             item = q.get()
@@ -89,6 +99,16 @@ def _write_chunks_to_file(q: _ChunkQueue, file_opener: Opener) -> None:
                 chunk = item
                 f.seek(chunk.offset)
                 f.write(chunk.data)
+
+                chunks_written += 1
+                bytes_written += len(chunk.data)
+
+                if chunks_written % 100 == 0:
+                    elapsed_time = time.time() - start_time
+                    percentage = (bytes_written / file_size_bytes) * 100
+                    print(
+                        f"Progress: {bytes_written}/{file_size_bytes} bytes ({percentage:.1f}%) - Time elapsed: {elapsed_time:.1f}s"
+                    )
             else:
                 raise ValueError(f"Unknown queue item type: {type(item)}")
 
@@ -116,11 +136,17 @@ class ParallelDownloader:
         download_config: ArtifactDownloadConfig,
     ) -> None:
         q = _ChunkQueue(maxsize=100)
-
-        # Start downloadign chunks
         num_chunks = int(
             math.ceil(file_size_bytes / float(download_config.chunk_size_bytes))
         )
+
+        # Start the writer thread first
+        write_file_handler = functools.partial(
+            _write_chunks_to_file, q, file_opener, file_size_bytes
+        )
+        write_future = executor.submit(write_file_handler)
+
+        # Start downloading chunks
         download_futures = []
         for i in range(num_chunks):
             start = i * download_config.chunk_size_bytes
@@ -134,10 +160,6 @@ class ParallelDownloader:
                 download_config.http_response_content_iter_size_bytes,
             )
             download_futures.append(executor.submit(download_handler))
-
-        # Start writing to file
-        write_file_handler = functools.partial(_write_chunks_to_file, q, file_opener)
-        write_future = executor.submit(write_file_handler)
 
         # Wait for download to finish
         done, not_done = concurrent.futures.wait(
