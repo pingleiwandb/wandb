@@ -103,11 +103,12 @@ def _write_chunks_to_file(
                 chunks_written += 1
                 bytes_written += len(chunk.data)
 
-                if chunks_written % 100 == 0:
+                if chunks_written % 1000 == 0:
                     elapsed_time = time.time() - start_time
                     percentage = (bytes_written / file_size_bytes) * 100
+                    mb_written = bytes_written / 1024 / 1024
                     print(
-                        f"Progress: {bytes_written}/{file_size_bytes} bytes ({percentage:.1f}%) - Time elapsed: {elapsed_time:.1f}s"
+                        f"Progress: {mb_written:.1f}/{file_size_bytes / 1024 / 1024:.1f} MB ({percentage:.1f}%) - Time elapsed: {elapsed_time:.1f}s - Speed: {mb_written / elapsed_time:.1f} MB/s"
                     )
             else:
                 raise ValueError(f"Unknown queue item type: {type(item)}")
