@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import functools
 import hashlib
 import math
 import os
+import queue
 import shutil
-from typing import TYPE_CHECKING, Any, Sequence
+import threading
+from typing import TYPE_CHECKING, Any, NamedTuple, Sequence
 from urllib.parse import quote
 
 import requests
@@ -16,6 +20,7 @@ from wandb.errors.term import termwarn
 from wandb.proto.wandb_internal_pb2 import ServerFeature
 from wandb.sdk.artifacts.artifact_file_cache import (
     ArtifactFileCache,
+    Opener,
     get_artifact_file_cache,
 )
 from wandb.sdk.artifacts.staging import get_staging_dir
@@ -58,6 +63,23 @@ _REQUEST_POOL_MAXSIZE = 64
 S3_MAX_PART_NUMBERS = 1000
 S3_MIN_MULTI_UPLOAD_SIZE = 2 * 1024**3
 S3_MAX_MULTI_UPLOAD_SIZE = 5 * 1024**4
+
+
+# Minimual size to switch to multipart download, same as upload, 2GB.
+_MULTIPART_DOWNLOAD_SIZE = S3_MIN_MULTI_UPLOAD_SIZE
+# Multipart download part size is same as multpart upload size, which is hard coded to 100MB.
+# https://github.com/wandb/wandb/blob/7b2a13cb8efcd553317167b823c8e52d8c3f7c4e/core/pkg/artifacts/saver.go#L496
+# https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance-guidelines.html#optimizing-performance-guidelines-get-range
+_DOWNLOAD_PART_SIZE_BYTES = 100 * 1024 * 1024
+# Chunk size for reading http response and writing to disk. 1MB.
+_HTTP_RES_CHUNK_SIZE_BYTES = 1 * 1024 * 1024
+# Singal end of _ChunkQueue, consumer (file writer) should stop after getting this item.
+_CUHNK_QUEUE_SENTIENL = object()
+
+
+class _ChunkContent(NamedTuple):
+    offset: int
+    data: bytes
 
 
 class WandbStoragePolicy(StoragePolicy):
@@ -120,7 +142,20 @@ class WandbStoragePolicy(StoragePolicy):
         artifact: Artifact,
         manifest_entry: ArtifactManifestEntry,
         dest_path: str | None = None,
+        executor: concurrent.futures.Executor | None = None,
+        multipart: bool | None = None,
     ) -> FilePathStr:
+        """Use cache or download the file using signed url.
+
+        Args:
+            executor: Passed from caller, artifact has a thread pool for multi file download.
+                Reuse the thread pool for multi part download. The thread pool is closed when
+                artifact download is done.
+            multipart: If set to `None` (default), the artifact will be downloaded
+                in parallel using multipart download if individual file size is greater than
+                2GB. If set to `True` or `False`, the artifact will be downloaded in
+                parallel or serially regardless of the file size.
+        """
         if dest_path is not None:
             self._cache._override_cache_path = dest_path
 
@@ -132,6 +167,16 @@ class WandbStoragePolicy(StoragePolicy):
             return path
 
         if manifest_entry._download_url is not None:
+            # Use multipart parallel download for large file
+            if self._should_multipart_download(
+                manifest_entry.size, multipart, executor
+            ):
+                # FIXME(pinglei): Remove after CR is ready for review.
+                # Make searching log easier for CI ...
+                print("pinglei: use multipart download")
+                self._multipart_file_download(executor, manifest_entry, cache_open)
+                return path
+            # Serial download
             response = self._session.get(manifest_entry._download_url, stream=True)
             try:
                 response.raise_for_status()
@@ -164,6 +209,105 @@ class WandbStoragePolicy(StoragePolicy):
             for data in response.iter_content(chunk_size=16 * 1024):
                 file.write(data)
         return path
+
+    def _should_multipart_download(
+        self,
+        file_size: int,
+        multipart: bool | None,
+        executor: concurrent.futures.Executor | None,
+    ) -> bool:
+        if executor is None:
+            return False
+        if multipart is not None:
+            return multipart
+        return file_size >= _MULTIPART_DOWNLOAD_SIZE
+
+    def _multipart_file_download(
+        self,
+        executor: concurrent.futures.Executor,
+        manifest_entry: ArtifactManifestEntry,
+        file_opener: Opener,
+    ):
+        """Download file as multiple parts in parallel.
+
+        Only one thread for writing to file. Each part run one http request in one thread.
+        HTTP response chunk of a file part is sent to the writer thread via a queue.
+        """
+        q = queue.Queue(maxsize=500)
+        file_size_bytes = manifest_entry.size
+        download_has_error = threading.Event()
+
+        # Start writer thread first
+        def write_chunks_to_file():
+            bytes_written = 0
+            with file_opener("wb") as f:
+                while not download_has_error.is_set():
+                    item = q.get()
+                    if item is _CUHNK_QUEUE_SENTIENL:
+                        # Normal shutdown, all the chunks are written
+                        return
+                    elif isinstance(item, _ChunkContent):
+                        try:
+                            f.seek(item.offset)
+                            f.write(item.data)
+                            bytes_written += len(item.data)
+                        except Exception as e:
+                            download_has_error.set()
+                            raise e
+                    else:
+                        raise ValueError(f"Unknown queue item type: {type(item)}")
+
+        write_future = executor.submit(write_chunks_to_file)
+
+        # Start download threads
+        def download_part(headers: dict):
+            # Other threads has error, not need to start
+            if download_has_error.is_set():
+                return
+            response = self._session.get(
+                url=manifest_entry._download_url,
+                headers=headers,
+                stream=True,
+            )
+            response.raise_for_status()
+
+            file_offset = start
+            for content in response.iter_content(chunk_size=_HTTP_RES_CHUNK_SIZE_BYTES):
+                if download_has_error.is_set():
+                    return
+                q.put(_ChunkContent(offset=file_offset, data=content))
+                file_offset += len(content)
+
+        download_futures = []
+        part_size = _DOWNLOAD_PART_SIZE_BYTES
+        num_chunks = int(math.ceil(file_size_bytes / float(part_size)))
+        for i in range(num_chunks):
+            # https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range
+            # Start and end are both inclusive, empty end means use the actual end of the file.
+            start = i * part_size
+            end = start + part_size - 1
+            if i == (num_chunks - 1):
+                end = ""
+            headers = {"Range": f"bytes={start}-{end}"}
+            download_handler = functools.partial(download_part, headers)
+            download_futures.append(executor.submit(download_handler))
+
+        # Wait for download
+        done, not_done = concurrent.futures.wait(
+            download_futures, return_when=concurrent.futures.FIRST_EXCEPTION
+        )
+        try:
+            for fut in done:
+                fut.result()
+        except Exception as e:
+            download_has_error.set()
+            raise e
+        finally:
+            # Always signal the writer to stop
+            q.put(_CUHNK_QUEUE_SENTIENL)
+
+        # Wait for writer
+        write_future.result()
 
     def store_reference(
         self,
