@@ -248,6 +248,7 @@ class WandbStoragePolicy(StoragePolicy):
                         return
                     elif isinstance(item, _ChunkContent):
                         try:
+                            # print(f"pinglei: write {item.offset} {len(item.data)}")
                             f.seek(item.offset)
                             f.write(item.data)
                             bytes_written += len(item.data)
@@ -260,7 +261,7 @@ class WandbStoragePolicy(StoragePolicy):
         write_future = executor.submit(write_chunks_to_file)
 
         # Start download threads
-        def download_part(headers: dict):
+        def download_part(headers: dict, start: int):
             # Other threads has error, not need to start
             if download_has_error.is_set():
                 return
@@ -281,6 +282,7 @@ class WandbStoragePolicy(StoragePolicy):
         download_futures = []
         part_size = _DOWNLOAD_PART_SIZE_BYTES
         num_chunks = int(math.ceil(file_size_bytes / float(part_size)))
+        print(f"pinglei: num_chunks: {num_chunks}")
         for i in range(num_chunks):
             # https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range
             # Start and end are both inclusive, empty end means use the actual end of the file.
@@ -289,7 +291,7 @@ class WandbStoragePolicy(StoragePolicy):
             if i == (num_chunks - 1):
                 end = ""
             headers = {"Range": f"bytes={start}-{end}"}
-            download_handler = functools.partial(download_part, headers)
+            download_handler = functools.partial(download_part, headers, start)
             download_futures.append(executor.submit(download_handler))
 
         # Wait for download
