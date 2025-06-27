@@ -314,6 +314,9 @@ func (as *ArtifactSaver) uploadFiles(
 		if err != nil {
 			return err
 		}
+		if len(parts) > 0 {
+			as.logger.Info("include multipart upload in request", "file", name, "parts", len(parts))
+		}
 		fileSpec := gql.CreateArtifactFileSpecInput{
 			ArtifactID:         artifactID,
 			Name:               name,
