@@ -391,11 +391,13 @@ func (as *ArtifactSaver) processFiles(
 				continue
 			}
 			if fileInfo.multipartUploadInfo != nil {
+				as.logger.Info("uploading multipart", "file", fileInfo.name, "parts", len(fileInfo.multipartUploadInfo))
 				partData := namedFileSpecs[fileInfo.name].UploadPartsInput
 				go func() {
 					doneChan <- as.uploadMultipart(*entry.LocalPath, fileInfo, partData)
 				}()
 			} else {
+				as.logger.Info("uploading single part", "file", fileInfo.name)
 				suboperation := wboperation.Get(as.ctx).Subtask(fileInfo.name)
 				task := newUploadTask(fileInfo, *entry.LocalPath)
 				task.Context = suboperation.Context(as.ctx)
@@ -491,9 +493,10 @@ func newUploadTask(
 }
 
 const (
-	S3MinMultiUploadSize = 2 << 30   // 2 GiB, the threshold we've chosen to switch to multipart
-	S3MaxMultiUploadSize = 5 << 40   // 5 TiB, maximum possible object size
-	S3DefaultChunkSize   = 100 << 20 // 1 MiB
+	// FIXME: changed to 200 MB to make testing easier. should be 2 GiB.
+	S3MinMultiUploadSize = 200 * 1024 * 1024
+	S3MaxMultiUploadSize = 5 << 40           // 5 TiB, maximum possible object size
+	S3DefaultChunkSize   = 100 * 1024 * 1024 // 100 MiB
 	S3MaxParts           = 10000
 )
 
@@ -632,10 +635,17 @@ func (as *ArtifactSaver) uploadMultipart(
 		}
 	}
 
+	as.logger.Info("completing multipart upload", "file", fileInfo.name, "parts", len(partEtags))
+
 	_, err = gql.CompleteMultipartUploadArtifact(
 		as.ctx, as.graphqlClient, gql.CompleteMultipartActionComplete, partEtags,
 		fileInfo.birthArtifactID, *fileInfo.storagePath, fileInfo.uploadID,
 	)
+	if err != nil {
+		as.logger.Error("error completing multipart upload", "err", err)
+	} else {
+		as.logger.Info("completed multipart upload", "file", fileInfo.name, "parts", len(partEtags))
+	}
 	return uploadResult{name: fileInfo.name, err: err}
 }
 
