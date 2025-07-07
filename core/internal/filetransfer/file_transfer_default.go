@@ -1,13 +1,16 @@
 package filetransfer
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -19,6 +22,8 @@ import (
 type DefaultFileTransfer struct {
 	// client is the HTTP client for the file transfer
 	client *retryablehttp.Client
+	// TODO: Remove it after benchmarking.
+	hm *httpRequestMaker
 
 	// logger is the logger for the file transfer
 	logger *observability.CoreLogger
@@ -27,15 +32,68 @@ type DefaultFileTransfer struct {
 	fileTransferStats FileTransferStats
 }
 
+type httpRequestMaker struct {
+	client *http.Client
+
+	mu  sync.Mutex
+	ips map[string]time.Time
+}
+
 // NewDefaultFileTransfer creates a new fileTransfer
 func NewDefaultFileTransfer(
 	client *retryablehttp.Client,
 	logger *observability.CoreLogger,
 	fileTransferStats FileTransferStats,
 ) *DefaultFileTransfer {
+	maker := &httpRequestMaker{
+		ips: make(map[string]time.Time),
+	}
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := dialer.DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			// Track ips to know how many hosts we are connecting to
+			if tcpConn, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+				maker.mu.Lock()
+				ip := tcpConn.IP.String()
+				totalHosts := len(maker.ips)
+				if _, ok := maker.ips[ip]; ok {
+					logger.Info("file transfer: upload: already connected to ip", "ip", ip, "totalHosts", totalHosts)
+				} else {
+					maker.ips[ip] = time.Now()
+					logger.Info("file transfer: upload: conneting to new ip", "ip", ip, "totalHosts", totalHosts)
+				}
+				maker.mu.Unlock()
+			}
+			return conn, nil
+		},
+		// TODO: Why we are still using HTTP/1.1 base on response header ...
+		// ForceAttemptHTTP2: true,
+
+		// TODO: Disable keep alive allow us to connect to more hosts and improve throughput.
+		// But i only worked on GCP, on AWS it is getting worse.
+		// We can consider copy s3's dns logic https://github.com/aws/aws-sdk-go-v2/blob/main/feature/s3/transfermanager/rrdns.go
+		// This allows reusing connection while connecting to more hosts.
+		DisableKeepAlives:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   2,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	maker.client = &http.Client{
+		Transport: tr,
+	}
 	fileTransfer := &DefaultFileTransfer{
 		logger:            logger,
 		client:            client,
+		hm:                maker,
 		fileTransferStats: fileTransferStats,
 	}
 	return fileTransfer
@@ -88,7 +146,7 @@ func (ft *DefaultFileTransfer) Upload(task *DefaultUploadTask) error {
 	if task.Context != nil {
 		req = req.WithContext(task.Context)
 	}
-	resp, err := ft.client.Do(req)
+	resp, err := ft.hm.client.Do(req.Request)
 	if err != nil {
 		return err
 	}
