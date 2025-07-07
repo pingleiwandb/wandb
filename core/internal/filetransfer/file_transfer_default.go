@@ -15,7 +15,6 @@ import (
 
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/wandb/wandb/core/internal/observability"
-	"github.com/wandb/wandb/core/internal/wboperation"
 )
 
 // DefaultFileTransfer uploads or downloads files to/from the server
@@ -276,28 +275,30 @@ func getUploadRequestBody(
 			return nil, fmt.Errorf("file transfer: file too large (%d bytes)", task.Size)
 		}
 
-		progress, err := wboperation.Get(task.Context).NewProgress()
-		if err != nil {
-			logger.CaptureError(fmt.Errorf("file transfer: %v", err))
-		}
+		// TODO: disabled progress tracking for now
+		// progress, err := wboperation.Get(task.Context).NewProgress()
+		// if err != nil {
+		// 	logger.CaptureError(fmt.Errorf("file transfer: %v", err))
+		// }
 
 		requestBody = NewProgressReader(
 			io.NewSectionReader(file, task.Offset, task.Size),
 			int(task.Size),
-			func(processed int, total int) {
-				if task.ProgressCallback != nil {
-					task.ProgressCallback(processed, total)
-				}
+			nil,
+			// func(processed int, total int) {
+			// 	if task.ProgressCallback != nil {
+			// 		task.ProgressCallback(processed, total)
+			// 	}
 
-				progress.SetBytesOfTotal(processed, total)
+			// 	progress.SetBytesOfTotal(processed, total)
 
-				fileTransferStats.UpdateUploadStats(FileUploadInfo{
-					FileKind:      task.FileKind,
-					Path:          task.Path,
-					UploadedBytes: int64(processed),
-					TotalBytes:    int64(total),
-				})
-			},
+			// 	fileTransferStats.UpdateUploadStats(FileUploadInfo{
+			// 		FileKind:      task.FileKind,
+			// 		Path:          task.Path,
+			// 		UploadedBytes: int64(processed),
+			// 		TotalBytes:    int64(total),
+			// 	})
+			// },
 		)
 	}
 	return requestBody, nil

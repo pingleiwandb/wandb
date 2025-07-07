@@ -11,7 +11,7 @@ type Storage int
 
 const (
 	bufferSize              = 32
-	DefaultConcurrencyLimit = 500 // TODO: change back to 128 after benchmarking
+	DefaultConcurrencyLimit = 20 // TODO: change back to 128 after benchmarking
 )
 
 // FileTransferManager uploads and downloads files.
