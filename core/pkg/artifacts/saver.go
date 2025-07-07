@@ -498,9 +498,10 @@ func newUploadTask(
 const (
 	// FIXME: changed to 200 MB to make testing easier. should be 2 GiB.
 	S3MinMultiUploadSize = 200 * 1024 * 1024
-	S3MaxMultiUploadSize = 5 << 40           // 5 TiB, maximum possible object size
-	S3DefaultChunkSize   = 500 * 1024 * 1024 // NOTE: changed from 100 MiB to 500 MiB to make testing easier.
-	S3MaxParts           = 10000
+	S3MaxMultiUploadSize = 5 << 40 // 5 TiB, maximum possible object size
+	// NOTE: 500MiB is not faster, stick with 100MiB for now.
+	S3DefaultChunkSize = 100 * 1024 * 1024
+	S3MaxParts         = 10000
 )
 
 func multiPartRequest(path string) ([]gql.UploadPartsInput, error) {
@@ -579,6 +580,7 @@ func (as *ArtifactSaver) uploadMultipart(
 		task.Context = suboperation.Context(as.ctx)
 		task.Url = part.UploadUrl
 		task.ChunkSize = int(chunkSize)
+		task.CreatedAt = time.Now()
 		task.Offset = int64(i) * chunkSize
 		remainingSize := statInfo.Size() - task.Offset
 		task.Size = min(remainingSize, chunkSize)

@@ -46,6 +46,10 @@ func (ft *DefaultFileTransfer) Upload(task *DefaultUploadTask) error {
 	ft.logger.Debug("default file transfer: uploading file", "path", task.Path, "url", task.Url)
 
 	start := time.Now()
+	waitForStart := time.Duration(0)
+	if !task.CreatedAt.IsZero() {
+		waitForStart = time.Since(task.CreatedAt)
+	}
 
 	// open the file for reading and defer closing it
 	file, err := os.Open(task.Path)
@@ -95,7 +99,15 @@ func (ft *DefaultFileTransfer) Upload(task *DefaultUploadTask) error {
 
 	spent := time.Since(start)
 	if task.ChunkSize > 0 {
-		ft.logger.Info("file transfer: uploaded chunk", "chunk", int(task.Offset)/task.ChunkSize, "spent", spent, "offset", task.Offset)
+		spentMs := spent.Milliseconds()
+		waitForStartMs := waitForStart.Milliseconds()
+		ft.logger.Info("file transfer: uploaded chunk",
+			"chunk", int(task.Offset)/task.ChunkSize,
+			"spentMs", spentMs,
+			"waitForStartMs", waitForStartMs,
+			"offset", task.Offset,
+			"chunkSize", task.ChunkSize,
+		)
 	}
 	return nil
 }

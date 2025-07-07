@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // DefaultTask is the default task to upload/download files
@@ -33,6 +34,7 @@ type DefaultTask struct {
 	Size int64
 
 	// TODO: Remove it after benchmarking.
+	CreatedAt time.Time
 	ChunkSize int
 	// Offset is the beginning of the file segment to upload
 	Offset int64
