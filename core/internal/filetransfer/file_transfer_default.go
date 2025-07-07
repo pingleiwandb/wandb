@@ -101,8 +101,10 @@ func (ft *DefaultFileTransfer) Upload(task *DefaultUploadTask) error {
 	if task.ChunkSize > 0 {
 		spentMs := spent.Milliseconds()
 		waitForStartMs := waitForStart.Milliseconds()
+		speedMBPerSec := float64(task.ChunkSize) / 1024 / 1024 / spent.Seconds()
 		ft.logger.Info("file transfer: uploaded chunk",
 			"chunk", int(task.Offset)/task.ChunkSize,
+			"speed", speedMBPerSec,
 			"spentMs", spentMs,
 			"waitForStartMs", waitForStartMs,
 			"offset", task.Offset,

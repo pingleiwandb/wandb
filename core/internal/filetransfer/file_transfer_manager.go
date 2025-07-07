@@ -80,6 +80,7 @@ func (fm *fileTransferManager) AddTask(task Task) {
 	go func() {
 		defer fm.wg.Done()
 
+		// TODO: What is the semaphore doing here? Make sure we can only run one task at a time.?
 		// Guard by a semaphore to limit number of concurrent uploads.
 		fm.semaphore <- struct{}{}
 		err := fm.transfer(task)
