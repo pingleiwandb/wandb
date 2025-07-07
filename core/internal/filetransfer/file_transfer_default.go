@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/wandb/wandb/core/internal/observability"
@@ -43,6 +44,8 @@ func NewDefaultFileTransfer(
 // Upload uploads a file to the server
 func (ft *DefaultFileTransfer) Upload(task *DefaultUploadTask) error {
 	ft.logger.Debug("default file transfer: uploading file", "path", task.Path, "url", task.Url)
+
+	start := time.Now()
 
 	// open the file for reading and defer closing it
 	file, err := os.Open(task.Path)
@@ -90,6 +93,9 @@ func (ft *DefaultFileTransfer) Upload(task *DefaultUploadTask) error {
 	}
 	task.Response = resp
 
+	spent := time.Since(start)
+	chunkSize := 100 * 1024 * 1024 // 100 MiB TODO: hard coded for now, need to aligh with S3DefaultChunkSize
+	ft.logger.Info("file transfer: uploaded chunk", "chunk", int(task.Offset)/chunkSize, "spent", spent, "offset", task.Offset)
 	return nil
 }
 
