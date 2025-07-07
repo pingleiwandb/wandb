@@ -32,6 +32,8 @@ type DefaultTask struct {
 	// then that many bytes starting from `Offset` are uploaded.
 	Size int64
 
+	// TODO: Remove it after benchmarking.
+	ChunkSize int
 	// Offset is the beginning of the file segment to upload
 	Offset int64
 

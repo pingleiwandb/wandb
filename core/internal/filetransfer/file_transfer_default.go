@@ -94,8 +94,9 @@ func (ft *DefaultFileTransfer) Upload(task *DefaultUploadTask) error {
 	task.Response = resp
 
 	spent := time.Since(start)
-	chunkSize := 100 * 1024 * 1024 // 100 MiB TODO: hard coded for now, need to aligh with S3DefaultChunkSize
-	ft.logger.Info("file transfer: uploaded chunk", "chunk", int(task.Offset)/chunkSize, "spent", spent, "offset", task.Offset)
+	if task.ChunkSize > 0 {
+		ft.logger.Info("file transfer: uploaded chunk", "chunk", int(task.Offset)/task.ChunkSize, "spent", spent, "offset", task.Offset)
+	}
 	return nil
 }
 
