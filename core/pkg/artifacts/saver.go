@@ -500,8 +500,7 @@ const (
 	S3MinMultiUploadSize = 200 * 1024 * 1024
 	S3MaxMultiUploadSize = 5 << 40 // 5 TiB, maximum possible object size
 	// NOTE: 500MiB is not faster, stick with 100MiB for now.
-	// Change to 20MB to create more connections
-	S3DefaultChunkSize = 20 * 1024 * 1024
+	S3DefaultChunkSize = 100 * 1024 * 1024
 	S3MaxParts         = 10000
 )
 
