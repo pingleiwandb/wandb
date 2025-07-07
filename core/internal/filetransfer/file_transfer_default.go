@@ -130,8 +130,8 @@ func (ft *DefaultFileTransfer) Upload(task *DefaultUploadTask) error {
 	if err != nil {
 		return err
 	}
-
-	req, err := retryablehttp.NewRequest(http.MethodPut, task.Url, requestBody)
+	req, err := http.NewRequest(http.MethodPut, task.Url, requestBody)
+	// req, err := retryablehttp.NewRequest(http.MethodPut, task.Url, requestBody)
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func (ft *DefaultFileTransfer) Upload(task *DefaultUploadTask) error {
 	if task.Context != nil {
 		req = req.WithContext(task.Context)
 	}
-	resp, err := ft.hm.client.Do(req.Request)
+	resp, err := ft.hm.client.Do(req)
 	if err != nil {
 		return err
 	}
