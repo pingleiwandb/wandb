@@ -528,8 +528,8 @@ func multiPartRequest(path string) ([]gql.UploadPartsInput, error) {
 	chunkSize := getChunkSize(fileSize)
 	numParts := int((fileSize + chunkSize - 1) / chunkSize)
 
-	// Use fixed number of hash workers (10 as suggested)
-	hashWorkers := 10
+	// Use fixed number of hash workers (30 as suggested)
+	hashWorkers := 30
 	if hashWorkers > numParts {
 		hashWorkers = numParts
 	}
