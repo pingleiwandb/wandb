@@ -310,12 +310,18 @@ func (as *ArtifactSaver) uploadFiles(
 		if entry.LocalPath == nil {
 			continue
 		}
+		startTime := time.Now()
 		parts, err := multiPartRequest(*entry.LocalPath)
 		if err != nil {
 			return err
 		}
 		if len(parts) > 0 {
-			as.logger.Info("include multipart upload in request", "file", name, "parts", len(parts))
+			hashDuration := time.Since(startTime)
+			as.logger.Info("include multipart upload in request",
+				"file", name,
+				"parts", len(parts),
+				"hashMs", hashDuration.Milliseconds(),
+			)
 		}
 		fileSpec := gql.CreateArtifactFileSpecInput{
 			ArtifactID:         artifactID,

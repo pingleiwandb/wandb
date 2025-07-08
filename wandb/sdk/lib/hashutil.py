@@ -4,6 +4,7 @@ import base64
 import hashlib
 import mmap
 import sys
+import time
 from typing import TYPE_CHECKING, NewType
 
 from wandb.sdk.lib.paths import StrPath
@@ -44,7 +45,11 @@ def hex_to_b64_id(encoded_string: str | bytes) -> B64MD5:
 
 
 def md5_file_b64(*paths: StrPath) -> B64MD5:
-    return _b64_from_hasher(_md5_file_hasher(*paths))
+    start_time = time.time()
+    digest = _b64_from_hasher(_md5_file_hasher(*paths))
+    end_time = time.time()
+    print(f"Time spent hashing file {paths}: {end_time - start_time:.4f} seconds")
+    return digest
 
 
 def md5_file_hex(*paths: StrPath) -> HexMD5:
