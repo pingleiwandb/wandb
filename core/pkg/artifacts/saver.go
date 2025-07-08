@@ -525,31 +525,100 @@ func multiPartRequest(path string) ([]gql.UploadPartsInput, error) {
 		return nil, fmt.Errorf("file size exceeds maximum S3 object size: %v", fileSize)
 	}
 
-	file, err := os.Open(path)
-	if err != nil {
+	chunkSize := getChunkSize(fileSize)
+	numParts := int((fileSize + chunkSize - 1) / chunkSize)
+
+	// Use fixed number of hash workers (10 as suggested)
+	hashWorkers := 10
+	if hashWorkers > numParts {
+		hashWorkers = numParts
+	}
+
+	// Create a slice to hold all parts, pre-allocated
+	partsInfo := make([]gql.UploadPartsInput, numParts)
+
+	// Create a wait group to wait for all hash workers to complete
+	var wg sync.WaitGroup
+
+	// Channel to collect errors from goroutines
+	errChan := make(chan error, hashWorkers)
+
+	// Calculate parts per worker
+	partsPerWorker := numParts / hashWorkers
+	remainingParts := numParts % hashWorkers
+
+	// Start hash workers
+	for workerID := 0; workerID < hashWorkers; workerID++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+
+			// Calculate the range of parts this worker should handle
+			startPart := worker * partsPerWorker
+			if worker < remainingParts {
+				startPart += worker
+			} else {
+				startPart += remainingParts
+			}
+
+			endPart := startPart + partsPerWorker
+			if worker < remainingParts {
+				endPart++
+			}
+
+			// Open file for this worker
+			file, err := os.Open(path)
+			if err != nil {
+				errChan <- fmt.Errorf("worker %d failed to open file: %w", worker, err)
+				return
+			}
+			defer file.Close()
+
+			// Reuse a single buffer for all parts in this worker
+			buffer := make([]byte, chunkSize)
+
+			// Process each part assigned to this worker
+			for partNumber := startPart + 1; partNumber <= endPart; partNumber++ {
+				// Calculate offset for this part
+				offset := int64(partNumber-1) * chunkSize
+
+				// Calculate the actual size of this part
+				partSize := chunkSize
+				if offset+partSize > fileSize {
+					partSize = fileSize - offset
+				}
+
+				// Create a section reader for this part
+				sectionReader := io.NewSectionReader(file, offset, partSize)
+
+				// Read the part data into the reused buffer
+				n, err := sectionReader.Read(buffer)
+				if err != nil && err != io.EOF {
+					errChan <- fmt.Errorf("worker %d failed to read part %d: %w", worker, partNumber, err)
+					return
+				}
+
+				// Calculate MD5 for the actual bytes read
+				hexMD5 := hashencode.ComputeHexMD5(buffer[:n])
+
+				// Store the part info (thread-safe since each worker writes to different indices)
+				partsInfo[partNumber-1] = gql.UploadPartsInput{
+					PartNumber: int64(partNumber),
+					HexMD5:     hexMD5,
+				}
+			}
+		}(workerID)
+	}
+
+	// Wait for all hash workers to complete
+	wg.Wait()
+	close(errChan)
+
+	// Check for any errors
+	for err := range errChan {
 		return nil, err
 	}
-	defer func() {
-		_ = file.Close()
-	}()
 
-	partsInfo := []gql.UploadPartsInput{}
-	partNumber := int64(1)
-	buffer := make([]byte, getChunkSize(fileSize))
-	for {
-		bytesRead, err := file.Read(buffer)
-		if err != nil && err != io.EOF {
-			return nil, err
-		}
-		if bytesRead == 0 {
-			break
-		}
-		partsInfo = append(partsInfo, gql.UploadPartsInput{
-			PartNumber: partNumber,
-			HexMD5:     hashencode.ComputeHexMD5(buffer[:bytesRead]),
-		})
-		partNumber++
-	}
 	return partsInfo, nil
 }
 
